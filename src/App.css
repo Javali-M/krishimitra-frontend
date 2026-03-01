@@ -1,0 +1,303 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: #f4f6f8;
+  font-family: "Segoe UI", sans-serif;
+}
+
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.auth-card {
+  width: min(460px, 100%);
+  background: #fff;
+  border-radius: 20px;
+  padding: 28px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+}
+
+.auth-card h1 {
+  font-size: 28px;
+  color: #2c3e50;
+  margin-bottom: 8px;
+}
+
+.auth-subtitle {
+  color: #596677;
+  margin-bottom: 18px;
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-form input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #d2d8de;
+}
+
+.auth-error {
+  color: #b42318;
+  font-size: 14px;
+}
+
+.auth-submit-btn {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: none;
+  background: #1f6f43;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.auth-switch-btn {
+  margin-top: 12px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: #1f6f43;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.page {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 40px 8%;
+  min-height: 100vh;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 40px;
+}
+
+.header h1 {
+  font-size: 40px;
+  line-height: 1.2;
+  color: #2c3e50;
+}
+
+.logout-btn {
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid #c8d0d8;
+  background: #fff;
+  color: #2c3e50;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Cards */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 30px;
+  margin-bottom: 50px;
+}
+
+.card {
+  padding: 40px 30px;
+  border-radius: 20px;
+  color: white;
+  text-align: center;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
+  transition: transform 0.2s ease;
+  cursor: pointer;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+}
+
+.green {
+  background: #1f6f43;
+}
+
+.blue {
+  background: #4da3d9;
+}
+
+.brown {
+  background: #8c6239;
+}
+
+/* Chat */
+
+.chat {
+  background: white;
+  padding: 30px;
+  border-radius: 20px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+  margin-bottom: 40px;
+}
+
+.chat-box {
+  min-height: 200px;
+  max-height: 420px;
+  overflow-y: auto;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.message {
+  padding: 12px 16px;
+  border-radius: 14px;
+  max-width: 60%;
+  word-break: break-word;
+}
+
+.message.user {
+  align-self: flex-end;
+  background: #d1e7dd;
+}
+
+.message.bot {
+  align-self: flex-start;
+  background: #f1f1f1;
+}
+
+.message-image-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.message-image {
+  width: min(320px, 100%);
+  border-radius: 12px;
+  object-fit: cover;
+}
+
+.image-label {
+  font-size: 12px;
+  color: #445;
+}
+
+.input-row {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.input-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid #ccc;
+}
+
+.upload-btn {
+  padding: 14px 18px;
+  border-radius: 12px;
+  border: 1px solid #c6ccd2;
+  background: #fff;
+  color: #2c3e50;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.file-input {
+  display: none;
+}
+
+.input-row button {
+  padding: 14px 24px;
+  border-radius: 12px;
+  border: none;
+  background: #1f6f43;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid #ddd;
+  padding-top: 20px;
+  font-size: 14px;
+}
+
+@media (max-width: 1024px) {
+  .page {
+    padding: 32px 6%;
+  }
+}
+
+@media (max-width: 768px) {
+  .page {
+    padding: 24px 5%;
+  }
+
+  .header {
+    margin-bottom: 28px;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .header h1 {
+    font-size: 30px;
+  }
+
+  .logout-btn {
+    width: 100%;
+  }
+
+  .cards {
+    gap: 18px;
+    margin-bottom: 32px;
+  }
+
+  .card {
+    padding: 28px 20px;
+  }
+
+  .chat {
+    padding: 20px;
+    margin-bottom: 28px;
+  }
+
+  .message {
+    max-width: 85%;
+  }
+
+  .input-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .upload-btn,
+  .input-row button {
+    width: 100%;
+    text-align: center;
+  }
+
+  .footer {
+    justify-content: center;
+    flex-wrap: wrap;
+    text-align: center;
+  }
+}
