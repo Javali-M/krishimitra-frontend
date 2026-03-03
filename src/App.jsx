@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8081").replace(/\/$/, "");
 const FARMER_ASK_ENDPOINT = import.meta.env.VITE_FARMER_ASK_ENDPOINT || "/api/farmer/ask";
 const CHAT_IMAGE_ENDPOINT = import.meta.env.VITE_CHAT_IMAGE_ENDPOINT || "/api/chat/images";
-const WEATHER_ENDPOINT = import.meta.env.VITE_WEATHER_ENDPOINT || "/api/weather/alerts";
+const WEATHER_CURRENT_ENDPOINT = import.meta.env.VITE_WEATHER_CURRENT_ENDPOINT || "/api/weather/current";
+const WEATHER_FORECAST_ENDPOINT = import.meta.env.VITE_WEATHER_FORECAST_ENDPOINT || "/api/weather/forecast";
+const WEATHER_DEFAULT_LOCATION = import.meta.env.VITE_WEATHER_LOCATION || "Hyderabad";
 const AUTH_SIGNUP_ENDPOINT = import.meta.env.VITE_AUTH_SIGNUP_ENDPOINT || "/api/auth/signup";
 const AUTH_LOGIN_ENDPOINT = import.meta.env.VITE_AUTH_LOGIN_ENDPOINT || "/api/auth/login";
 const AUTH_LOGOUT_ENDPOINT = import.meta.env.VITE_AUTH_LOGOUT_ENDPOINT || "/api/auth/logout";
@@ -78,12 +80,106 @@ const extractBotText = (responseData) => {
 const extractWeatherCardData = (responseData) => {
   const payload = responseData?.data || responseData;
   const temperature = payload?.temperature ?? payload?.tempC ?? payload?.temp ?? "--";
-  const alert = payload?.alert || payload?.alerts || payload?.description || "No weather alerts";
+  const condition = payload?.condition || payload?.alert || payload?.description || "No weather data";
+  const humidity = payload?.humidity ?? "--";
+  const windSpeed = payload?.windSpeed ?? payload?.wind ?? "--";
+  const location = payload?.location || WEATHER_DEFAULT_LOCATION;
 
   return {
     temperature,
-    alert: Array.isArray(alert) ? alert[0] || "No weather alerts" : alert
+    condition: Array.isArray(condition) ? condition[0] || "No weather data" : condition,
+    humidity,
+    windSpeed,
+    location
   };
+};
+
+const isRainCondition = (condition = "") => /rain|drizzle|shower|storm|thunder/i.test(condition);
+
+const extractForecastItems = (responseData) => {
+  const payload = responseData?.data || responseData;
+  return Array.isArray(payload) ? payload : [];
+};
+
+const formatAlertTime = (timestamp) => {
+  if (!timestamp) {
+    return "soon";
+  }
+
+  const parsedDate = new Date(timestamp);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return String(timestamp);
+  }
+
+  return parsedDate.toLocaleString([], {
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+};
+
+const buildWeatherAlerts = (currentWeather, forecastItems) => {
+  const alerts = [];
+  const humidityValue = Number(currentWeather?.humidity);
+  const temperatureValue = Number(currentWeather?.temperature);
+  const currentCondition = currentWeather?.condition || "";
+
+  if (isRainCondition(currentCondition)) {
+    alerts.push({
+      id: "immediate-rain",
+      severity: "high",
+      title: "Immediate rain warning",
+      message: `Current condition is ${currentCondition}. Consider protecting harvested crop and equipment now.`
+    });
+  }
+
+  if (!Number.isNaN(humidityValue) && humidityValue <= 30) {
+    alerts.push({
+      id: "dryness",
+      severity: "medium",
+      title: "Extreme dryness alert",
+      message: `Humidity is ${humidityValue}%. Soil can dry quickly; consider irrigation scheduling.`
+    });
+  }
+
+  if (!Number.isNaN(humidityValue) && humidityValue >= 85) {
+    alerts.push({
+      id: "high-humidity",
+      severity: "medium",
+      title: "High humidity alert",
+      message: `Humidity is ${humidityValue}%. Disease risk may increase for sensitive crops.`
+    });
+  }
+
+  if (!Number.isNaN(temperatureValue) && temperatureValue >= 38) {
+    alerts.push({
+      id: "heat-stress",
+      severity: "high",
+      title: "Heat stress warning",
+      message: `Temperature is ${temperatureValue}°C. Irrigate and avoid midday spray activity.`
+    });
+  }
+
+  const nextRain = forecastItems.find((item) => isRainCondition(item?.condition || ""));
+  if (nextRain) {
+    alerts.push({
+      id: "next-rain",
+      severity: "low",
+      title: "Next rain expected",
+      message: `${nextRain.condition || "Rain"} expected around ${formatAlertTime(nextRain.timestamp)}.`
+    });
+  }
+
+  if (!alerts.length) {
+    alerts.push({
+      id: "no-critical-alert",
+      severity: "low",
+      title: "No immediate weather risks",
+      message: "No rain, extreme dryness, or high humidity warnings at the moment."
+    });
+  }
+
+  return alerts;
 };
 
 const toDataUrl = (file) =>
@@ -115,7 +211,16 @@ export default function App() {
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
   const [isSending, setIsSending] = useState(false);
-  const [weatherInfo, setWeatherInfo] = useState({ temperature: "--", alert: "Loading weather..." });
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isNotificationsLoading, setIsNotificationsLoading] = useState(false);
+  const [weatherAlerts, setWeatherAlerts] = useState([]);
+  const [weatherInfo, setWeatherInfo] = useState({
+    temperature: "--",
+    condition: "Loading weather...",
+    humidity: "--",
+    windSpeed: "--",
+    location: WEATHER_DEFAULT_LOCATION
+  });
 
   useEffect(() => {
     if (!token) {
@@ -138,15 +243,21 @@ export default function App() {
 
     const fetchWeatherAlerts = async () => {
       try {
-        const responseData = await apiRequest(WEATHER_ENDPOINT, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`
+        const responseData = await apiRequest(
+          `${WEATHER_CURRENT_ENDPOINT}?location=${encodeURIComponent(WEATHER_DEFAULT_LOCATION)}`,
+          {
+          method: "GET"
           }
-        });
+        );
         setWeatherInfo(extractWeatherCardData(responseData));
       } catch {
-        setWeatherInfo({ temperature: "--", alert: "Weather service unavailable" });
+        setWeatherInfo({
+          temperature: "--",
+          condition: "Weather service unavailable",
+          humidity: "--",
+          windSpeed: "--",
+          location: WEATHER_DEFAULT_LOCATION
+        });
       }
     };
 
@@ -226,7 +337,15 @@ export default function App() {
     setToken("");
     setCurrentUser(null);
     setMessages([]);
-    setWeatherInfo({ temperature: "--", alert: "Loading weather..." });
+    setWeatherAlerts([]);
+    setIsNotificationsOpen(false);
+    setWeatherInfo({
+      temperature: "--",
+      condition: "Loading weather...",
+      humidity: "--",
+      windSpeed: "--",
+      location: WEATHER_DEFAULT_LOCATION
+    });
     setQuestion("");
     setAuthError("");
   };
@@ -350,19 +469,72 @@ export default function App() {
     event.target.value = "";
   };
 
+  const openNotifications = async () => {
+    if (!token) {
+      return;
+    }
+
+    const nextOpenState = !isNotificationsOpen;
+    setIsNotificationsOpen(nextOpenState);
+
+    if (!nextOpenState) {
+      return;
+    }
+
+    setIsNotificationsLoading(true);
+
+    try {
+      const [currentResponse, forecastResponse] = await Promise.all([
+        apiRequest(
+          `${WEATHER_CURRENT_ENDPOINT}?location=${encodeURIComponent(WEATHER_DEFAULT_LOCATION)}`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          }
+        ),
+        apiRequest(
+          `${WEATHER_FORECAST_ENDPOINT}?location=${encodeURIComponent(WEATHER_DEFAULT_LOCATION)}&days=7`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          }
+        )
+      ]);
+
+      const currentData = extractWeatherCardData(currentResponse);
+      const forecastItems = extractForecastItems(forecastResponse);
+      setWeatherAlerts(buildWeatherAlerts(currentData, forecastItems));
+    } catch {
+      setWeatherAlerts([
+        {
+          id: "weather-fetch-error",
+          severity: "high",
+          title: "Unable to load weather alerts",
+          message: "Please try again. Weather service may be temporarily unavailable."
+        }
+      ]);
+    } finally {
+      setIsNotificationsLoading(false);
+    }
+  };
+
   if (!currentUser || !token) {
     return (
       <main className="auth-page">
         <section className="auth-card">
-          <h1>{authMode === "login" ? "Login" : "Sign Up"}</h1>
-          <p className="auth-subtitle">Access your farmer dashboard and chat history.</p>
+          <h1>{authMode === "login" ? "LOGIN" : "SIGN UP"}</h1>
+          <p className="auth-subtitle">Access your farmer dashboard terminal</p>
 
           <form className="auth-form" onSubmit={handleAuthSubmit}>
             {authMode === "signup" ? (
               <input
                 type="text"
                 name="name"
-                placeholder="Full name"
+                placeholder="Enter full name..."
                 value={authForm.name}
                 onChange={handleAuthInput}
               />
@@ -371,7 +543,7 @@ export default function App() {
             <input
               type="email"
               name="email"
-              placeholder="Email"
+              placeholder="Enter email..."
               value={authForm.email}
               onChange={handleAuthInput}
             />
@@ -379,7 +551,7 @@ export default function App() {
             <input
               type="password"
               name="password"
-              placeholder="Password"
+              placeholder="Enter password..."
               value={authForm.password}
               onChange={handleAuthInput}
             />
@@ -388,10 +560,10 @@ export default function App() {
 
             <button type="submit" className="auth-submit-btn" disabled={isAuthSubmitting}>
               {isAuthSubmitting
-                ? "Please wait..."
+                ? "LOADING..."
                 : authMode === "login"
-                  ? "Login"
-                  : "Create account"}
+                  ? "[ ENTER ]"
+                  : "[ CREATE ]"}
             </button>
           </form>
 
@@ -403,7 +575,7 @@ export default function App() {
               setAuthError("");
             }}
           >
-            {authMode === "login" ? "New user? Sign up" : "Already have an account? Login"}
+            {authMode === "login" ? "» New user? Create account" : "» Already registered? Login"}
           </button>
         </section>
       </main>
@@ -413,25 +585,31 @@ export default function App() {
   return (
     <div className="page">
       <header className="header">
-        <h1>Namaste, {currentUser.name || "Farmer"} 👋</h1>
-        <button className="logout-btn" onClick={logout}>Logout</button>
+        <h1>NAMASTE, {(currentUser.name || "Farmer").toUpperCase()}</h1>
+        <button className="logout-btn" onClick={logout}>[ LOGOUT ]</button>
       </header>
 
-      <section className="cards">
-        <div className="card green">
-          <h2>AI</h2>
-          <p>Ask Krishi Mitra</p>
+      <section className="weather-dashboard">
+        <div className="weather-main">
+          <div>
+            <div className="weather-temp">
+              <h2>{weatherInfo.temperature === "--" ? "--" : weatherInfo.temperature}</h2>
+              <span>°C</span>
+            </div>
+            <p className="weather-condition">{weatherInfo.condition}</p>
+          </div>
+          <div className="weather-stats">
+            <div className="weather-stat">
+              <div className="weather-stat-value">{weatherInfo.humidity === "--" ? "--" : `${weatherInfo.humidity}%`}</div>
+              <div className="weather-stat-label">Humidity</div>
+            </div>
+            <div className="weather-stat">
+              <div className="weather-stat-value">{weatherInfo.windSpeed === "--" ? "--" : weatherInfo.windSpeed}</div>
+              <div className="weather-stat-label">Wind km/h</div>
+            </div>
+          </div>
         </div>
-
-        <div className="card blue">
-          <h2>{weatherInfo.temperature === "--" ? "--" : `${weatherInfo.temperature}°C`}</h2>
-          <p>{weatherInfo.alert}</p>
-        </div>
-
-        <div className="card brown">
-          <h2>₹2500</h2>
-          <p>Wheat Price</p>
-        </div>
+        <div className="weather-location">📍 {weatherInfo.location}</div>
       </section>
 
       <section className="chat">
@@ -454,11 +632,11 @@ export default function App() {
           <input
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
-            placeholder="Ask about crop disease..."
+            placeholder="Enter query about crops, disease, weather..."
             disabled={isSending}
           />
           <label className="upload-btn" htmlFor="plant-image-upload">
-            Upload Plant Image
+            [ UPLOAD ]
           </label>
           <input
             id="plant-image-upload"
@@ -468,14 +646,38 @@ export default function App() {
             className="file-input"
             disabled={isSending}
           />
-          <button onClick={sendMessage} disabled={isSending}>{isSending ? "Sending..." : "Send"}</button>
+          <button onClick={sendMessage} disabled={isSending}>{isSending ? "..." : "SEND"}</button>
         </div>
       </section>
 
       <footer className="footer">
-        <div>🏠 Home</div>
-        <div>🔔 Notifications</div>
+        <button 
+          type="button" 
+          className={`footer-notifications-btn ${weatherAlerts.length > 0 && weatherAlerts[0].id !== 'no-critical-alert' ? 'has-alerts' : ''}`}
+          onClick={openNotifications}
+        >
+          [ ALERTS ]
+        </button>
       </footer>
+
+      {isNotificationsOpen ? (
+        <section className="notifications-panel">
+          <h3>Weather Alerts</h3>
+
+          {isNotificationsLoading ? (
+            <p className="notifications-empty">Loading alerts...</p>
+          ) : (
+            <div className="notifications-list">
+              {weatherAlerts.map((alert) => (
+                <article key={alert.id} className={`notification-item ${alert.severity}`}>
+                  <h4>{alert.title}</h4>
+                  <p>{alert.message}</p>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : null}
     </div>
   );
 }
