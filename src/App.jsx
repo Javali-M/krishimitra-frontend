@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8081").replace(/\/$/, "");
+const AUTH_BASE_URL = (import.meta.env.VITE_AUTH_BASE_URL || "http://localhost:8080").replace(/\/$/, "");
+const AGENT_BASE_URL = (import.meta.env.VITE_AGENT_BASE_URL || "http://localhost:8082").replace(/\/$/, "");
 const FARMER_ASK_ENDPOINT = import.meta.env.VITE_FARMER_ASK_ENDPOINT || "/api/farmer/ask";
 const CHAT_IMAGE_ENDPOINT = import.meta.env.VITE_CHAT_IMAGE_ENDPOINT || "/api/chat/images";
 const WEATHER_CURRENT_ENDPOINT = import.meta.env.VITE_WEATHER_CURRENT_ENDPOINT || "/api/weather/current";
@@ -10,21 +12,23 @@ const WEATHER_DEFAULT_LOCATION = import.meta.env.VITE_WEATHER_LOCATION || "Hyder
 const AUTH_SIGNUP_ENDPOINT = import.meta.env.VITE_AUTH_SIGNUP_ENDPOINT || "/api/auth/signup";
 const AUTH_LOGIN_ENDPOINT = import.meta.env.VITE_AUTH_LOGIN_ENDPOINT || "/api/auth/login";
 const AUTH_LOGOUT_ENDPOINT = import.meta.env.VITE_AUTH_LOGOUT_ENDPOINT || "/api/auth/logout";
+const AGENT_ASK_ENDPOINT = import.meta.env.VITE_AGENT_ASK_ENDPOINT || "/agent/ask";
 const TOKEN_STORAGE_KEY = "farmai_auth_token";
 const USER_STORAGE_KEY = "farmai_auth_user";
+const LOCATION_STORAGE_KEY = "farmai_user_location";
 
 const createMessageId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-const buildApiUrl = (path) => {
+const buildApiUrl = (path, baseUrl = API_BASE_URL) => {
   if (path.startsWith("http://") || path.startsWith("https://")) {
     return path;
   }
 
-  return `${API_BASE_URL}${path}`;
+  return `${baseUrl}${path}`;
 };
 
-const apiRequest = async (path, options = {}) => {
-  const response = await fetch(buildApiUrl(path), {
+const apiRequest = async (path, options = {}, baseUrl = API_BASE_URL) => {
+  const response = await fetch(buildApiUrl(path, baseUrl), {
     ...options,
     headers: {
       ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
@@ -190,6 +194,132 @@ const toDataUrl = (file) =>
     reader.readAsDataURL(file);
   });
 
+const formatMarkdown = (text) => {
+  return text
+    // Insert newline before markdown list items (- **...**)
+    .replace(/(?<!\n)-\s*\*\*/g, '\n- **')
+    // Insert newline before bold headings like **Name:** that aren't already at line start
+    .replace(/(?<=\S)(\*\*[A-Za-z\s]+?:\*\*)/g, '\n$1')
+    // numbered list items: "1." "2." etc not at start
+    .replace(/(?<=\S)(\d+\.\s)/g, '\n$1')
+    // Bold
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Italic
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    // Inline code
+    .replace(/`(.+?)`/g, '<code>$1</code>')
+    // Newlines to <br>
+    .replace(/\n/g, '<br/>');
+};
+
+const parseAgentResponse = (text) => {
+  if (!text) return [];
+
+  const sections = [];
+  let remaining = text;
+
+  // Pattern: "LLM requested tool: <tool>" segments
+  const toolRequestPattern = /LLM requested tool:\s*(\S+)/g;
+  // Pattern: "result:" segments
+  const resultPattern = /result:\s*/gi;
+  // Pattern: "Final Answer:" segment
+  const finalAnswerPattern = /Final Answer:\s*/gi;
+
+  // Split by known markers
+  const markers = [];
+  const markerRegex = /(LLM requested tool:\s*\S+|(?:^|\s)result:\s*|Final Answer:\s*)/gi;
+  let match;
+  while ((match = markerRegex.exec(remaining)) !== null) {
+    markers.push({ index: match.index, text: match[0].trim(), length: match[0].length });
+  }
+
+  if (markers.length === 0) {
+    // No agent markers found, return as plain text
+    return [{ type: "text", content: text }];
+  }
+
+  // Text before first marker
+  const preamble = remaining.slice(0, markers[0].index).trim();
+  if (preamble) {
+    sections.push({ type: "text", content: preamble });
+  }
+
+  for (let i = 0; i < markers.length; i++) {
+    const marker = markers[i];
+    const contentStart = marker.index + marker.length;
+    const contentEnd = i + 1 < markers.length ? markers[i + 1].index : remaining.length;
+    const content = remaining.slice(contentStart, contentEnd).trim();
+
+    if (marker.text.toLowerCase().startsWith("llm requested tool:")) {
+      const toolName = marker.text.replace(/LLM requested tool:\s*/i, "");
+      sections.push({ type: "tool-call", tool: toolName, content });
+    } else if (marker.text.toLowerCase().startsWith("result:") || marker.text.toLowerCase().startsWith("result:")) {
+      sections.push({ type: "tool-result", content });
+    } else if (marker.text.toLowerCase().startsWith("final answer:")) {
+      sections.push({ type: "final-answer", content });
+    }
+  }
+
+  return sections;
+};
+
+const AgentMessage = ({ text }) => {
+  const sections = parseAgentResponse(text);
+
+  // If no structured sections, render as plain text
+  if (sections.length === 1 && sections[0].type === "text") {
+    return <span dangerouslySetInnerHTML={{ __html: formatMarkdown(sections[0].content) }} />;
+  }
+
+  return (
+    <div className="agent-response">
+      {sections.map((section, idx) => {
+        if (section.type === "tool-call") {
+          return (
+            <div key={idx} className="agent-step agent-tool-call">
+              <div className="agent-step-header">
+                <span className="agent-step-icon">🔧</span>
+                <span className="agent-step-label">Using tool</span>
+                <span className="agent-tool-name">{section.tool}</span>
+              </div>
+              {section.content && (
+                <div className="agent-step-body" dangerouslySetInnerHTML={{ __html: formatMarkdown(section.content) }} />
+              )}
+            </div>
+          );
+        }
+        if (section.type === "tool-result") {
+          return (
+            <div key={idx} className="agent-step agent-tool-result">
+              <div className="agent-step-header">
+                <span className="agent-step-icon">📋</span>
+                <span className="agent-step-label">Tool result</span>
+              </div>
+              <div className="agent-step-body" dangerouslySetInnerHTML={{ __html: formatMarkdown(section.content) }} />
+            </div>
+          );
+        }
+        if (section.type === "final-answer") {
+          return (
+            <div key={idx} className="agent-step agent-final-answer">
+              <div className="agent-step-header">
+                <span className="agent-step-icon">✅</span>
+                <span className="agent-step-label">Answer</span>
+              </div>
+              <div className="agent-step-body" dangerouslySetInnerHTML={{ __html: formatMarkdown(section.content) }} />
+            </div>
+          );
+        }
+        return (
+          <div key={idx} className="agent-step agent-text">
+            <span dangerouslySetInnerHTML={{ __html: formatMarkdown(section.content) }} />
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(() => {
     try {
@@ -207,10 +337,21 @@ export default function App() {
     email: "",
     password: ""
   });
+  const [userLocation, setUserLocation] = useState(() => {
+    try {
+      const saved = localStorage.getItem(LOCATION_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : { lat: null, lon: null, name: WEATHER_DEFAULT_LOCATION };
+    } catch {
+      return { lat: null, lon: null, name: WEATHER_DEFAULT_LOCATION };
+    }
+  });
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+  const [locationError, setLocationError] = useState("");
   const [authError, setAuthError] = useState("");
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState([]);
   const [isSending, setIsSending] = useState(false);
+  const [pendingImage, setPendingImage] = useState(null);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isNotificationsLoading, setIsNotificationsLoading] = useState(false);
   const [weatherAlerts, setWeatherAlerts] = useState([]);
@@ -221,6 +362,14 @@ export default function App() {
     windSpeed: "--",
     location: WEATHER_DEFAULT_LOCATION
   });
+
+  const chatBoxRef = useRef(null);
+
+  useEffect(() => {
+    if (chatBoxRef.current) {
+      chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
+    }
+  }, [messages]);
 
   useEffect(() => {
     if (!token) {
@@ -234,7 +383,17 @@ export default function App() {
     if (currentUser) {
       localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(currentUser));
     }
-  }, [token, currentUser]);
+    if (userLocation) {
+      localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(userLocation));
+    }
+  }, [token, currentUser, userLocation]);
+
+  const getLocationQuery = () => {
+    if (userLocation.lat && userLocation.lon) {
+      return `${userLocation.lat},${userLocation.lon}`;
+    }
+    return userLocation.name || WEATHER_DEFAULT_LOCATION;
+  };
 
   useEffect(() => {
     if (!token) {
@@ -243,8 +402,9 @@ export default function App() {
 
     const fetchWeatherAlerts = async () => {
       try {
+        const locationQuery = getLocationQuery();
         const responseData = await apiRequest(
-          `${WEATHER_CURRENT_ENDPOINT}?location=${encodeURIComponent(WEATHER_DEFAULT_LOCATION)}`,
+          `${WEATHER_CURRENT_ENDPOINT}?location=${encodeURIComponent(locationQuery)}`,
           {
           method: "GET"
           }
@@ -262,11 +422,50 @@ export default function App() {
     };
 
     fetchWeatherAlerts();
-  }, [token]);
+  }, [token, userLocation]);
 
   const handleAuthInput = (event) => {
     const { name, value } = event.target;
     setAuthForm((prevForm) => ({ ...prevForm, [name]: value }));
+  };
+
+  const detectLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationError("Geolocation not supported by your browser.");
+      return;
+    }
+
+    setIsDetectingLocation(true);
+    setLocationError("");
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const newLocation = {
+          lat: position.coords.latitude,
+          lon: position.coords.longitude,
+          name: `${position.coords.latitude.toFixed(2)}, ${position.coords.longitude.toFixed(2)}`
+        };
+        setUserLocation(newLocation);
+        localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(newLocation));
+        setIsDetectingLocation(false);
+      },
+      (error) => {
+        setLocationError("Unable to detect location. Please enter manually.");
+        setIsDetectingLocation(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  const handleLocationNameChange = (e) => {
+    const name = e.target.value;
+    setUserLocation((prev) => ({ ...prev, name, lat: null, lon: null }));
+  };
+
+  const saveLocationName = () => {
+    if (userLocation.name.trim()) {
+      localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(userLocation));
+    }
   };
 
   const handleAuthSubmit = async (event) => {
@@ -292,7 +491,7 @@ export default function App() {
       const responseData = await apiRequest(endpoint, {
         method: "POST",
         body: JSON.stringify(payload)
-      });
+      }, AUTH_BASE_URL);
 
       const authToken = extractToken(responseData);
 
@@ -329,7 +528,7 @@ export default function App() {
         headers: {
           Authorization: `Bearer ${token}`
         }
-      });
+      }, AUTH_BASE_URL);
     } catch {
       // Keep UI logout behavior even if backend logout call fails.
     }
@@ -350,123 +549,184 @@ export default function App() {
     setAuthError("");
   };
 
-  const sendMessage = async () => {
-    const userText = question.trim();
+  const streamAgentResponse = async (botMessageId, response) => {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = "";
+    let displayedLength = 0;
+    let streamDone = false;
 
-    if (!userText || isSending || !token) return;
+    // Collect SSE data in background
+    const readStream = async () => {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-    setQuestion("");
-    setIsSending(true);
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+        for (const line of lines) {
+          if (line.startsWith("data:")) {
+            const data = line.slice(5).trim();
+            if (data && data !== "[DONE]") {
+              fullText += data;
+            }
+          } else if (line.trim() && !line.startsWith(":")) {
+            fullText += line;
+          }
+        }
+      }
+      streamDone = true;
+    };
 
-    setMessages((prevMessages) => [
-      ...prevMessages,
-      { id: createMessageId(), role: "user", type: "text", text: userText }
-    ]);
+    // Typewriter: reveal characters gradually
+    const typewrite = () =>
+      new Promise((resolve) => {
+        const CHARS_PER_TICK = 3;
+        const TICK_MS = 16;
 
-    try {
-      const responseData = await apiRequest(FARMER_ASK_ENDPOINT, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          question: userText
-        })
+        const tick = () => {
+          if (displayedLength < fullText.length) {
+            displayedLength = Math.min(displayedLength + CHARS_PER_TICK, fullText.length);
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botMessageId
+                  ? { ...msg, text: fullText.slice(0, displayedLength) }
+                  : msg
+              )
+            );
+            setTimeout(tick, TICK_MS);
+          } else if (!streamDone) {
+            // Waiting for more data from stream
+            setTimeout(tick, TICK_MS);
+          } else {
+            // Stream finished and all text revealed
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botMessageId ? { ...msg, text: fullText } : msg
+              )
+            );
+            resolve();
+          }
+        };
+        tick();
       });
 
-      setMessages((prevMessages) => [
-        ...prevMessages,
-        {
-          id: createMessageId(),
-          role: "bot",
-          type: "text",
-          text: extractBotText(responseData)
-        }
-      ]);
-    } catch (error) {
-      setMessages((prevMessages) => [
-        ...prevMessages,
-        {
-          id: createMessageId(),
-          role: "bot",
-          type: "text",
-          text: error.message || "Unable to fetch response from backend."
-        }
-      ]);
-    } finally {
-      setIsSending(false);
-    }
+    // Run both concurrently
+    await Promise.all([readStream(), typewrite()]);
+
+    return fullText;
   };
 
-  const uploadPlantImage = async (event) => {
-    const file = event.target.files?.[0];
+  const sendMessage = async () => {
+    const userText = question.trim();
+    const hasImage = !!pendingImage;
 
-    if (!file) {
-      return;
-    }
+    if ((!userText && !hasImage) || isSending || !token) return;
 
-    if (!file.type.startsWith("image/")) {
-      alert("Please upload a valid image file.");
-      event.target.value = "";
-      return;
-    }
+    const currentImage = pendingImage;
+    setQuestion("");
+    setPendingImage(null);
+    setIsSending(true);
 
-    if (file.size > 4 * 1024 * 1024) {
-      alert("Please upload an image smaller than 4MB.");
-      event.target.value = "";
-      return;
-    }
-
-    try {
-      setIsSending(true);
-      const imageUrl = await toDataUrl(file);
-
-      setMessages((prevMessages) => [
-        ...prevMessages,
+    // Add user message(s)
+    if (hasImage) {
+      const imageUrl = await toDataUrl(currentImage.file);
+      setMessages((prev) => [
+        ...prev,
         {
           id: createMessageId(),
           role: "user",
           type: "image",
           imageUrl,
-          imageName: file.name
-        }
+          imageName: currentImage.file.name
+        },
+        ...(userText
+          ? [{ id: createMessageId(), role: "user", type: "text", text: userText }]
+          : [])
       ]);
+    } else {
+      setMessages((prev) => [
+        ...prev,
+        { id: createMessageId(), role: "user", type: "text", text: userText }
+      ]);
+    }
 
+    const botMessageId = createMessageId();
+    setMessages((prev) => [
+      ...prev,
+      { id: botMessageId, role: "bot", type: "text", text: "" }
+    ]);
+
+    try {
       const formData = new FormData();
-      formData.append("image", file);
+      formData.append("message", userText || `Analyze this crop/plant image: ${currentImage.file.name}`);
+      if (hasImage) {
+        formData.append("images", currentImage.file);
+      }
 
-      const responseData = await apiRequest(CHAT_IMAGE_ENDPOINT, {
+      const url = buildApiUrl(AGENT_ASK_ENDPOINT, AGENT_BASE_URL);
+      const response = await fetch(url, {
         method: "POST",
         headers: {
+          Accept: "text/event-stream",
           Authorization: `Bearer ${token}`
         },
         body: formData
       });
 
-      setMessages((prevMessages) => [
-        ...prevMessages,
-        {
-          id: createMessageId(),
-          role: "bot",
-          type: "text",
-          text: extractBotText(responseData)
-        }
-      ]);
+      if (!response.ok) {
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+
+      const accumulatedText = await streamAgentResponse(botMessageId, response);
+
+      if (!accumulatedText.trim()) {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === botMessageId
+              ? { ...msg, text: "I received your request successfully." }
+              : msg
+          )
+        );
+      }
     } catch (error) {
-      setMessages((prevMessages) => [
-        ...prevMessages,
-        {
-          id: createMessageId(),
-          role: "bot",
-          type: "text",
-          text: error.message || "Unable to process image with backend."
-        }
-      ]);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === botMessageId
+            ? { ...msg, text: error.message || "Unable to fetch response from backend." }
+            : msg
+        )
+      );
     } finally {
       setIsSending(false);
     }
+  };
 
+  const uploadPlantImage = (event) => {
+    const file = event.target.files?.[0];
     event.target.value = "";
+
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert("Please upload a valid image file.");
+      return;
+    }
+
+    if (file.size > 4 * 1024 * 1024) {
+      alert("Please upload an image smaller than 4MB.");
+      return;
+    }
+
+    const previewUrl = URL.createObjectURL(file);
+    setPendingImage({ file, previewUrl });
+  };
+
+  const removePendingImage = () => {
+    if (pendingImage) {
+      URL.revokeObjectURL(pendingImage.previewUrl);
+      setPendingImage(null);
+    }
   };
 
   const openNotifications = async () => {
@@ -484,9 +744,10 @@ export default function App() {
     setIsNotificationsLoading(true);
 
     try {
+      const locationQuery = getLocationQuery();
       const [currentResponse, forecastResponse] = await Promise.all([
         apiRequest(
-          `${WEATHER_CURRENT_ENDPOINT}?location=${encodeURIComponent(WEATHER_DEFAULT_LOCATION)}`,
+          `${WEATHER_CURRENT_ENDPOINT}?location=${encodeURIComponent(locationQuery)}`,
           {
             method: "GET",
             headers: {
@@ -495,7 +756,7 @@ export default function App() {
           }
         ),
         apiRequest(
-          `${WEATHER_FORECAST_ENDPOINT}?location=${encodeURIComponent(WEATHER_DEFAULT_LOCATION)}&days=7`,
+          `${WEATHER_FORECAST_ENDPOINT}?location=${encodeURIComponent(locationQuery)}&days=7`,
           {
             method: "GET",
             headers: {
@@ -528,6 +789,32 @@ export default function App() {
         <section className="auth-card">
           <h1>{authMode === "login" ? "LOGIN" : "SIGN UP"}</h1>
           <p className="auth-subtitle">Access your farmer dashboard terminal</p>
+
+          <div className="location-section">
+            <p className="location-label">📍 Your Farm Location</p>
+            <div className="location-input-row">
+              <input
+                type="text"
+                placeholder="Enter city or region..."
+                value={userLocation.name}
+                onChange={handleLocationNameChange}
+                onBlur={saveLocationName}
+                className="location-input"
+              />
+              <button
+                type="button"
+                className="detect-location-btn"
+                onClick={detectLocation}
+                disabled={isDetectingLocation}
+              >
+                {isDetectingLocation ? "..." : "📍 AUTO"}
+              </button>
+            </div>
+            {userLocation.lat && userLocation.lon ? (
+              <p className="location-coords">✓ Coordinates: {userLocation.lat.toFixed(4)}, {userLocation.lon.toFixed(4)}</p>
+            ) : null}
+            {locationError ? <p className="location-error">{locationError}</p> : null}
+          </div>
 
           <form className="auth-form" onSubmit={handleAuthSubmit}>
             {authMode === "signup" ? (
@@ -613,7 +900,7 @@ export default function App() {
       </section>
 
       <section className="chat">
-        <div className="chat-box">
+        <div className="chat-box" ref={chatBoxRef}>
           {messages.map((msg) => (
             <div key={msg.id} className={`message ${msg.role}`}>
               {msg.type === "image" ? (
@@ -621,6 +908,8 @@ export default function App() {
                   <img src={msg.imageUrl} alt={msg.imageName || "Uploaded plant"} className="message-image" />
                   {msg.imageName ? <p className="image-label">{msg.imageName}</p> : null}
                 </div>
+              ) : msg.role === "bot" ? (
+                <AgentMessage text={msg.text} />
               ) : (
                 msg.text
               )}
@@ -628,15 +917,26 @@ export default function App() {
           ))}
         </div>
 
+        {pendingImage && (
+          <div className="pending-image-preview">
+            <div className="pending-image-thumb">
+              <img src={pendingImage.previewUrl} alt="Attached" />
+              <button
+                className="pending-image-remove"
+                onClick={removePendingImage}
+                disabled={isSending}
+                title="Remove image"
+              >
+                ✕
+              </button>
+            </div>
+            <span className="pending-image-name">{pendingImage.file.name}</span>
+          </div>
+        )}
+
         <div className="input-row">
-          <input
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            placeholder="Enter query about crops, disease, weather..."
-            disabled={isSending}
-          />
-          <label className="upload-btn" htmlFor="plant-image-upload">
-            [ UPLOAD ]
+          <label className="upload-btn" htmlFor="plant-image-upload" title="Attach image">
+            📷
           </label>
           <input
             id="plant-image-upload"
@@ -644,6 +944,13 @@ export default function App() {
             accept="image/*"
             onChange={uploadPlantImage}
             className="file-input"
+            disabled={isSending}
+          />
+          <input
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+            placeholder={pendingImage ? "Add a message about this image..." : "Enter query about crops, disease, weather..."}
             disabled={isSending}
           />
           <button onClick={sendMessage} disabled={isSending}>{isSending ? "..." : "SEND"}</button>
