@@ -81,6 +81,46 @@ const extractBotText = (responseData) => {
   );
 };
 
+const WMO_WEATHER_CODES = {
+  0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+  45: "Fog", 48: "Depositing rime fog",
+  51: "Light drizzle", 53: "Moderate drizzle", 55: "Dense drizzle",
+  61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
+  71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow",
+  80: "Slight rain showers", 81: "Moderate rain showers", 82: "Violent rain showers",
+  85: "Slight snow showers", 86: "Heavy snow showers",
+  95: "Thunderstorm", 96: "Thunderstorm with slight hail", 99: "Thunderstorm with heavy hail"
+};
+
+const fetchWeatherByCity = async (cityName) => {
+  const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cityName)}&count=1`);
+  const geoData = await geoRes.json();
+  const place = geoData?.results?.[0];
+  if (!place) throw new Error("City not found");
+
+  const weatherRes = await fetch(
+    `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&hourly=temperature_2m,weather_code&forecast_days=3&timezone=auto`
+  );
+  const weatherData = await weatherRes.json();
+  const c = weatherData.current;
+
+  const current = {
+    temperature: c?.temperature_2m ?? "--",
+    condition: WMO_WEATHER_CODES[c?.weather_code] || "Unknown",
+    humidity: c?.relative_humidity_2m ?? "--",
+    windSpeed: c?.wind_speed_10m ?? "--",
+    location: place.name
+  };
+
+  const forecast = (weatherData.hourly?.time || []).map((time, i) => ({
+    timestamp: time,
+    condition: WMO_WEATHER_CODES[weatherData.hourly.weather_code?.[i]] || "Unknown",
+    temperature: weatherData.hourly.temperature_2m?.[i]
+  }));
+
+  return { current, forecast };
+};
+
 const extractWeatherCardData = (responseData) => {
   const payload = responseData?.data || responseData;
   const temperature = payload?.temperature ?? payload?.tempC ?? payload?.temp ?? "--";
@@ -196,8 +236,14 @@ const toDataUrl = (file) =>
 
 const formatMarkdown = (text) => {
   return text
+    // Insert newline before ### headings that aren't at line start
+    .replace(/(?<=\S)(#{1,3}\s)/g, '\n$1')
+    // Convert ### Heading to bold
+    .replace(/#{1,3}\s+(.+?)(?=\n|$|#{1,3}\s)/g, '\n<strong>$1</strong>')
     // Insert newline before markdown list items (- **...**)
     .replace(/(?<!\n)-\s*\*\*/g, '\n- **')
+    // Insert newline before bare list items (- text) not at line start
+    .replace(/(?<=\S)(- )/g, '\n$1')
     // Insert newline before bold headings like **Name:** that aren't already at line start
     .replace(/(?<=\S)(\*\*[A-Za-z\s]+?:\*\*)/g, '\n$1')
     // numbered list items: "1." "2." etc not at start
@@ -400,16 +446,11 @@ export default function App() {
       return;
     }
 
-    const fetchWeatherAlerts = async () => {
+    const fetchWeather = async () => {
       try {
         const locationQuery = getLocationQuery();
-        const responseData = await apiRequest(
-          `${WEATHER_CURRENT_ENDPOINT}?location=${encodeURIComponent(locationQuery)}`,
-          {
-          method: "GET"
-          }
-        );
-        setWeatherInfo(extractWeatherCardData(responseData));
+        const { current } = await fetchWeatherByCity(locationQuery);
+        setWeatherInfo(current);
       } catch {
         setWeatherInfo({
           temperature: "--",
@@ -421,7 +462,7 @@ export default function App() {
       }
     };
 
-    fetchWeatherAlerts();
+    fetchWeather();
   }, [token, userLocation]);
 
   const handleAuthInput = (event) => {
@@ -745,30 +786,8 @@ export default function App() {
 
     try {
       const locationQuery = getLocationQuery();
-      const [currentResponse, forecastResponse] = await Promise.all([
-        apiRequest(
-          `${WEATHER_CURRENT_ENDPOINT}?location=${encodeURIComponent(locationQuery)}`,
-          {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${token}`
-            }
-          }
-        ),
-        apiRequest(
-          `${WEATHER_FORECAST_ENDPOINT}?location=${encodeURIComponent(locationQuery)}&days=7`,
-          {
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${token}`
-            }
-          }
-        )
-      ]);
-
-      const currentData = extractWeatherCardData(currentResponse);
-      const forecastItems = extractForecastItems(forecastResponse);
-      setWeatherAlerts(buildWeatherAlerts(currentData, forecastItems));
+      const { current, forecast } = await fetchWeatherByCity(locationQuery);
+      setWeatherAlerts(buildWeatherAlerts(current, forecast));
     } catch {
       setWeatherAlerts([
         {
