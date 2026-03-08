@@ -484,13 +484,13 @@ export default function App() {
         const newLocation = {
           lat: position.coords.latitude,
           lon: position.coords.longitude,
-          name: `${position.coords.latitude.toFixed(2)}, ${position.coords.longitude.toFixed(2)}`
+          name: userLocation.name || WEATHER_DEFAULT_LOCATION
         };
         setUserLocation(newLocation);
         localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(newLocation));
         setIsDetectingLocation(false);
       },
-      (error) => {
+      () => {
         setLocationError("Unable to detect location. Please enter manually.");
         setIsDetectingLocation(false);
       },
@@ -525,9 +525,12 @@ export default function App() {
 
     try {
       const endpoint = authMode === "signup" ? AUTH_SIGNUP_ENDPOINT : AUTH_LOGIN_ENDPOINT;
+      const locationPayload = userLocation.lat && userLocation.lon
+        ? { latitude: userLocation.lat, longitude: userLocation.lon }
+        : { city: userLocation.name || WEATHER_DEFAULT_LOCATION };
       const payload = authMode === "signup"
-        ? { fullName, email, password, latitude: userLocation.lat, longitude: userLocation.lon }
-        : { email, password, latitude: userLocation.lat, longitude: userLocation.lon };
+        ? { fullName, email, password, ...locationPayload }
+        : { email, password, ...locationPayload };
 
       const responseData = await apiRequest(endpoint, {
         method: "POST",
@@ -830,7 +833,7 @@ export default function App() {
               </button>
             </div>
             {userLocation.lat && userLocation.lon ? (
-              <p className="location-coords">✓ Coordinates: {userLocation.lat.toFixed(4)}, {userLocation.lon.toFixed(4)}</p>
+              <p className="location-coords">✓ Coordinates detected</p>
             ) : null}
             {locationError ? <p className="location-error">{locationError}</p> : null}
           </div>
