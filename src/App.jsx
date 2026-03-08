@@ -485,8 +485,8 @@ export default function App() {
     try {
       const endpoint = authMode === "signup" ? AUTH_SIGNUP_ENDPOINT : AUTH_LOGIN_ENDPOINT;
       const payload = authMode === "signup"
-        ? { fullName, email, password }
-        : { email, password };
+        ? { fullName, email, password, latitude: userLocation.lat, longitude: userLocation.lon }
+        : { email, password, latitude: userLocation.lat, longitude: userLocation.lon };
 
       const responseData = await apiRequest(endpoint, {
         method: "POST",
