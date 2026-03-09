@@ -517,7 +517,7 @@ export default function App() {
             `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=10`
           );
           const data = await res.json();
-          cityName = data?.address?.city || data?.address?.town || data?.address?.village || data?.address?.state || "";
+          cityName = data?.address?.city || data?.address?.town || data?.address?.state_district || data?.address?.county || data?.address?.village || data?.address?.suburb || "";
         } catch {
           // Fall back if reverse geocoding fails
         }
