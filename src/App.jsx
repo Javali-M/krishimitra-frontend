@@ -94,15 +94,45 @@ const WMO_WEATHER_CODES = {
   95: "Thunderstorm", 96: "Thunderstorm with slight hail", 99: "Thunderstorm with heavy hail"
 };
 
+const getAqiLabel = (aqi) => {
+  if (aqi <= 50) return "Good";
+  if (aqi <= 100) return "Moderate";
+  if (aqi <= 150) return "Unhealthy (Sensitive)";
+  if (aqi <= 200) return "Unhealthy";
+  if (aqi <= 300) return "Very Unhealthy";
+  return "Hazardous";
+};
+
+const fetchAirQuality = async (lat, lon) => {
+  try {
+    const res = await fetch(
+      `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=us_aqi,pm2_5,pm10`
+    );
+    const data = await res.json();
+    const c = data?.current;
+    return {
+      aqi: c?.us_aqi ?? "--",
+      pm25: c?.pm2_5 ?? "--",
+      pm10: c?.pm10 ?? "--",
+      aqiLabel: c?.us_aqi != null ? getAqiLabel(c.us_aqi) : "--"
+    };
+  } catch {
+    return { aqi: "--", pm25: "--", pm10: "--", aqiLabel: "--" };
+  }
+};
+
 const fetchWeatherByCity = async (cityName) => {
   const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cityName)}&count=1`);
   const geoData = await geoRes.json();
   const place = geoData?.results?.[0];
   if (!place) throw new Error("City not found");
 
-  const weatherRes = await fetch(
-    `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&hourly=temperature_2m,weather_code&forecast_days=3&timezone=auto`
-  );
+  const [weatherRes, airQuality] = await Promise.all([
+    fetch(
+      `https://api.open-meteo.com/v1/forecast?latitude=${place.latitude}&longitude=${place.longitude}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&hourly=temperature_2m,weather_code&forecast_days=3&timezone=auto`
+    ),
+    fetchAirQuality(place.latitude, place.longitude)
+  ]);
   const weatherData = await weatherRes.json();
   const c = weatherData.current;
 
@@ -111,7 +141,8 @@ const fetchWeatherByCity = async (cityName) => {
     condition: WMO_WEATHER_CODES[c?.weather_code] || "Unknown",
     humidity: c?.relative_humidity_2m ?? "--",
     windSpeed: c?.wind_speed_10m ?? "--",
-    location: place.name
+    location: place.name,
+    ...airQuality
   };
 
   const forecast = (weatherData.hourly?.time || []).map((time, i) => ({
@@ -124,9 +155,12 @@ const fetchWeatherByCity = async (cityName) => {
 };
 
 const fetchWeatherByCoords = async (lat, lon, locationName) => {
-  const weatherRes = await fetch(
-    `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&hourly=temperature_2m,weather_code&forecast_days=3&timezone=auto`
-  );
+  const [weatherRes, airQuality] = await Promise.all([
+    fetch(
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&hourly=temperature_2m,weather_code&forecast_days=3&timezone=auto`
+    ),
+    fetchAirQuality(lat, lon)
+  ]);
   const weatherData = await weatherRes.json();
   const c = weatherData.current;
 
@@ -135,7 +169,8 @@ const fetchWeatherByCoords = async (lat, lon, locationName) => {
     condition: WMO_WEATHER_CODES[c?.weather_code] || "Unknown",
     humidity: c?.relative_humidity_2m ?? "--",
     windSpeed: c?.wind_speed_10m ?? "--",
-    location: locationName || `${lat}, ${lon}`
+    location: locationName || `${lat}, ${lon}`,
+    ...airQuality
   };
 
   const forecast = (weatherData.hourly?.time || []).map((time, i) => ({
@@ -240,12 +275,22 @@ const buildWeatherAlerts = (currentWeather, forecastItems) => {
     });
   }
 
+  const aqiValue = Number(currentWeather?.aqi);
+  if (!Number.isNaN(aqiValue) && aqiValue > 150) {
+    alerts.push({
+      id: "poor-air-quality",
+      severity: aqiValue > 200 ? "high" : "medium",
+      title: "Poor air quality",
+      message: `AQI is ${aqiValue} (${currentWeather?.aqiLabel || "Unhealthy"}). Limit outdoor work and protect respiratory health.`
+    });
+  }
+
   if (!alerts.length) {
     alerts.push({
       id: "no-critical-alert",
       severity: "low",
       title: "No immediate weather risks",
-      message: "No rain, extreme dryness, or high humidity warnings at the moment."
+      message: "No rain, extreme dryness, high humidity, or air quality warnings at the moment."
     });
   }
 
@@ -432,6 +477,10 @@ export default function App() {
     condition: "Loading weather...",
     humidity: "--",
     windSpeed: "--",
+    aqi: "--",
+    aqiLabel: "--",
+    pm25: "--",
+    pm10: "--",
     location: WEATHER_DEFAULT_LOCATION
   });
 
@@ -484,6 +533,10 @@ export default function App() {
           condition: "Weather service unavailable",
           humidity: "--",
           windSpeed: "--",
+          aqi: "--",
+          aqiLabel: "--",
+          pm25: "--",
+          pm10: "--",
           location: WEATHER_DEFAULT_LOCATION
         });
       }
@@ -524,6 +577,7 @@ export default function App() {
 
         const newLocation = { lat, lon, name: cityName || WEATHER_DEFAULT_LOCATION };
         setUserLocation(newLocation);
+        setLocationError("");
         localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(newLocation));
         setIsDetectingLocation(false);
       },
@@ -553,6 +607,7 @@ export default function App() {
       if (place) {
         const updated = { lat: place.latitude, lon: place.longitude, name: place.name };
         setUserLocation(updated);
+        setLocationError("");
         localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(updated));
         return;
       }
@@ -644,6 +699,10 @@ export default function App() {
       condition: "Loading weather...",
       humidity: "--",
       windSpeed: "--",
+      aqi: "--",
+      aqiLabel: "--",
+      pm25: "--",
+      pm10: "--",
       location: WEATHER_DEFAULT_LOCATION
     });
     setQuestion("");
@@ -897,8 +956,8 @@ export default function App() {
                 {isDetectingLocation ? "..." : "📍 AUTO"}
               </button>
             </div>
-            {userLocation.lat && userLocation.lon ? (
-              <p className="location-coords">✓ Coordinates detected</p>
+            {userLocation.lat && userLocation.lon && !locationError ? (
+              <p className="location-coords">✓ {userLocation.name} — coordinates detected</p>
             ) : null}
             {locationError ? <p className="location-error">{locationError}</p> : null}
           </div>
@@ -980,6 +1039,10 @@ export default function App() {
             <div className="weather-stat">
               <div className="weather-stat-value">{weatherInfo.windSpeed === "--" ? "--" : weatherInfo.windSpeed}</div>
               <div className="weather-stat-label">Wind km/h</div>
+            </div>
+            <div className="weather-stat">
+              <div className="weather-stat-value">{weatherInfo.aqi === "--" ? "--" : weatherInfo.aqi}</div>
+              <div className="weather-stat-label">AQI ({weatherInfo.aqiLabel})</div>
             </div>
           </div>
         </div>
