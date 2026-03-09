@@ -121,6 +121,30 @@ const fetchWeatherByCity = async (cityName) => {
   return { current, forecast };
 };
 
+const fetchWeatherByCoords = async (lat, lon, locationName) => {
+  const weatherRes = await fetch(
+    `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&hourly=temperature_2m,weather_code&forecast_days=3&timezone=auto`
+  );
+  const weatherData = await weatherRes.json();
+  const c = weatherData.current;
+
+  const current = {
+    temperature: c?.temperature_2m ?? "--",
+    condition: WMO_WEATHER_CODES[c?.weather_code] || "Unknown",
+    humidity: c?.relative_humidity_2m ?? "--",
+    windSpeed: c?.wind_speed_10m ?? "--",
+    location: locationName || `${lat}, ${lon}`
+  };
+
+  const forecast = (weatherData.hourly?.time || []).map((time, i) => ({
+    timestamp: time,
+    condition: WMO_WEATHER_CODES[weatherData.hourly.weather_code?.[i]] || "Unknown",
+    temperature: weatherData.hourly.temperature_2m?.[i]
+  }));
+
+  return { current, forecast };
+};
+
 const extractWeatherCardData = (responseData) => {
   const payload = responseData?.data || responseData;
   const temperature = payload?.temperature ?? payload?.tempC ?? payload?.temp ?? "--";
@@ -448,8 +472,9 @@ export default function App() {
 
     const fetchWeather = async () => {
       try {
-        const locationQuery = getLocationQuery();
-        const { current } = await fetchWeatherByCity(locationQuery);
+        const { current } = userLocation.lat && userLocation.lon
+          ? await fetchWeatherByCoords(userLocation.lat, userLocation.lon, userLocation.name)
+          : await fetchWeatherByCity(userLocation.name || WEATHER_DEFAULT_LOCATION);
         setWeatherInfo(current);
       } catch {
         setWeatherInfo({
@@ -788,8 +813,9 @@ export default function App() {
     setIsNotificationsLoading(true);
 
     try {
-      const locationQuery = getLocationQuery();
-      const { current, forecast } = await fetchWeatherByCity(locationQuery);
+      const { current, forecast } = userLocation.lat && userLocation.lon
+        ? await fetchWeatherByCoords(userLocation.lat, userLocation.lon, userLocation.name)
+        : await fetchWeatherByCity(userLocation.name || WEATHER_DEFAULT_LOCATION);
       setWeatherAlerts(buildWeatherAlerts(current, forecast));
     } catch {
       setWeatherAlerts([
