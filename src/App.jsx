@@ -28,10 +28,12 @@ const buildApiUrl = (path, baseUrl = API_BASE_URL) => {
 };
 
 const apiRequest = async (path, options = {}, baseUrl = API_BASE_URL) => {
+  const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
   const response = await fetch(buildApiUrl(path, baseUrl), {
     ...options,
     headers: {
       ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+      ...(storedToken ? { Authorization: `Bearer ${storedToken}` } : {}),
       ...(options.headers || {})
     }
   });
@@ -593,10 +595,7 @@ export default function App() {
 
     try {
       await apiRequest(AUTH_LOGOUT_ENDPOINT, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
+        method: "POST"
       }, AUTH_BASE_URL);
     } catch {
       // Keep UI logout behavior even if backend logout call fails.
@@ -733,12 +732,13 @@ export default function App() {
         formData.append("images", currentImage.file);
       }
 
+      const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
       const url = buildApiUrl(AGENT_ASK_ENDPOINT, AGENT_BASE_URL);
       const response = await fetch(url, {
         method: "POST",
         headers: {
           Accept: "text/event-stream",
-          Authorization: `Bearer ${token}`
+          ...(storedToken ? { Authorization: `Bearer ${storedToken}` } : {})
         },
         body: formData
       });
