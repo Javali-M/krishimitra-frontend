@@ -631,6 +631,14 @@ export default function App() {
     setMessages([]);
     setWeatherAlerts([]);
     setIsNotificationsOpen(false);
+    setUserLocation({ lat: null, lon: null, name: "" });
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    localStorage.removeItem(USER_STORAGE_KEY);
+    localStorage.removeItem(LOCATION_STORAGE_KEY);
+    sessionStorage.clear();
+    document.cookie.split(";").forEach((c) => {
+      document.cookie = c.trim().split("=")[0] + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
+    });
     setWeatherInfo({
       temperature: "--",
       condition: "Loading weather...",
@@ -855,6 +863,12 @@ export default function App() {
       setIsNotificationsLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!currentUser && !token && !userLocation.lat && !userLocation.lon && !userLocation.name && !isDetectingLocation) {
+      detectLocation();
+    }
+  }, [currentUser, token]);
 
   if (!currentUser || !token) {
     return (
