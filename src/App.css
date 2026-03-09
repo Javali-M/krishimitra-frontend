@@ -280,7 +280,7 @@ body::before {
 /* ===== MAIN PAGE ===== */
 .page {
   width: 100%;
-  max-width: calc(100% - 80px);
+  max-width: calc(100% - 230px);
   margin: 0 auto;
   padding: 30px 20px;
   min-height: 100vh;
