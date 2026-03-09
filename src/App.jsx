@@ -507,12 +507,22 @@ export default function App() {
     setLocationError("");
 
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const newLocation = {
-          lat: position.coords.latitude,
-          lon: position.coords.longitude,
-          name: userLocation.name || WEATHER_DEFAULT_LOCATION
-        };
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        let cityName = "";
+
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&zoom=10`
+          );
+          const data = await res.json();
+          cityName = data?.address?.city || data?.address?.town || data?.address?.village || data?.address?.state || "";
+        } catch {
+          // Fall back if reverse geocoding fails
+        }
+
+        const newLocation = { lat, lon, name: cityName || WEATHER_DEFAULT_LOCATION };
         setUserLocation(newLocation);
         localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(newLocation));
         setIsDetectingLocation(false);
@@ -530,10 +540,27 @@ export default function App() {
     setUserLocation((prev) => ({ ...prev, name, lat: null, lon: null }));
   };
 
-  const saveLocationName = () => {
-    if (userLocation.name.trim()) {
-      localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(userLocation));
+  const saveLocationName = async () => {
+    const cityName = userLocation.name.trim();
+    if (!cityName) return;
+
+    try {
+      const geoRes = await fetch(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(cityName)}&count=1`
+      );
+      const geoData = await geoRes.json();
+      const place = geoData?.results?.[0];
+      if (place) {
+        const updated = { lat: place.latitude, lon: place.longitude, name: place.name };
+        setUserLocation(updated);
+        localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(updated));
+        return;
+      }
+    } catch {
+      // geocoding failed, save without coords
     }
+
+    localStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(userLocation));
   };
 
   const handleAuthSubmit = async (event) => {
@@ -552,9 +579,7 @@ export default function App() {
 
     try {
       const endpoint = authMode === "signup" ? AUTH_SIGNUP_ENDPOINT : AUTH_LOGIN_ENDPOINT;
-      const locationPayload = userLocation.lat && userLocation.lon
-        ? { latitude: userLocation.lat, longitude: userLocation.lon }
-        : { city: userLocation.name || WEATHER_DEFAULT_LOCATION };
+      const locationPayload = { latitude: userLocation.lat || 0.0, longitude: userLocation.lon || 0.0 };
       const payload = authMode === "signup"
         ? { fullName, email, password, ...locationPayload }
         : { email, password, ...locationPayload };
