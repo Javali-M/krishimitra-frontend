@@ -280,7 +280,7 @@ body::before {
 /* ===== MAIN PAGE ===== */
 .page {
   width: 100%;
-  max-width: calc(100% - 40px);
+  max-width: calc(100% - 80px);
   margin: 0 auto;
   padding: 30px 20px;
   min-height: 100vh;
@@ -361,8 +361,8 @@ body::before {
 .weather-dashboard {
   background: var(--bg-card);
   border: 3px solid var(--border-dark);
-  padding: 24px;
-  margin-bottom: 20px;
+  padding: 14px 20px;
+  margin-bottom: 16px;
   position: relative;
   box-shadow: 5px 5px 0 var(--border-retro);
 }
@@ -406,7 +406,7 @@ body::before {
 
 .weather-temp h2 {
   font-family: 'VT323', monospace;
-  font-size: 72px;
+  font-size: 52px;
   color: var(--accent-amber);
   line-height: 1;
 }
@@ -432,14 +432,14 @@ body::before {
 
 .weather-stat {
   text-align: center;
-  padding: 14px 18px;
+  padding: 8px 14px;
   border: 2px solid var(--border-retro);
   background: var(--bg-paper);
 }
 
 .weather-stat-value {
   font-family: 'VT323', monospace;
-  font-size: 32px;
+  font-size: 26px;
   color: var(--accent-green);
 }
 
@@ -466,8 +466,8 @@ body::before {
 .weather-location {
   width: 100%;
   text-align: center;
-  margin-top: 16px;
-  padding-top: 12px;
+  margin-top: 10px;
+  padding-top: 8px;
   border-top: 2px dashed var(--border-retro);
   font-size: 13px;
   color: var(--text-dim);
@@ -518,8 +518,8 @@ body::before {
 }
 
 .chat-box {
-  min-height: 300px;
-  max-height: 65vh;
+  min-height: 500px;
+  max-height: 75vh;
   overflow-y: auto;
   margin-bottom: 16px;
   display: flex;
