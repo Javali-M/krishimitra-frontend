@@ -451,12 +451,16 @@ body::before {
   margin-top: 4px;
 }
 
-.weather-stat:first-child::before {
+.weather-stat:nth-child(1)::before {
   content: '💧 ';
 }
 
-.weather-stat:last-child::before {
+.weather-stat:nth-child(2)::before {
   content: '💨 ';
+}
+
+.weather-stat:nth-child(3)::before {
+  content: '🌫️ ';
 }
 
 .weather-location {
