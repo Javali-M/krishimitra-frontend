@@ -1047,6 +1047,7 @@ body::before {
 /* ===== RESPONSIVE ===== */
 @media (max-width: 768px) {
   .page {
+    max-width: 100%;
     padding: 20px 4%;
   }
 
@@ -1070,13 +1071,17 @@ body::before {
     text-align: center;
   }
 
+  .weather-dashboard {
+    padding: 14px 12px;
+  }
+
   .weather-main {
     flex-direction: column;
     align-items: flex-start;
   }
 
   .weather-temp h2 {
-    font-size: 56px;
+    font-size: 48px;
   }
 
   .weather-stats {
@@ -1086,10 +1091,20 @@ body::before {
 
   .weather-stat {
     flex: 1;
-    padding: 12px;
+    padding: 10px 8px;
+    font-size: 12px;
+  }
+
+  .weather-stat-value {
+    font-size: 22px;
+  }
+
+  .weather-stat-label {
+    font-size: 10px;
   }
 
   .chat-box {
+    min-height: 300px;
     max-height: 50vh;
   }
 
@@ -1129,5 +1144,41 @@ body::before {
   .detect-location-btn {
     width: 100%;
     text-align: center;
+  }
+
+  .notifications-panel {
+    padding: 16px 12px;
+  }
+
+  .notification-item {
+    padding: 12px 14px 12px 24px;
+  }
+
+  .notification-item h4 {
+    font-size: 18px;
+  }
+}
+
+/* Extra-small screens (phones < 480px) */
+@media (max-width: 480px) {
+  .weather-stats {
+    flex-direction: column;
+  }
+
+  .weather-stat {
+    flex: none;
+    width: 100%;
+  }
+
+  .weather-temp h2 {
+    font-size: 42px;
+  }
+
+  .auth-card {
+    padding: 20px 16px;
+  }
+
+  .auth-card h1 {
+    font-size: 28px;
   }
 }
